@@ -101,17 +101,19 @@ def register_handlers(dp: Dispatcher) -> None:
     @dp.message(F.text.startswith("/debug"))
     async def debug_schedule(message: Message):
         """
-        Калибровка прямо из телефона, без терминала и компьютера.
+        Калибровка/диагностика прямо из телефона, без терминала.
         Пишете боту, например: /debug 24 сентября
-        Бот сходит на сайт, покажет что нашёл, и пришлёт файлом всё,
-        что перехватил по сети — это и есть debug_schedule_capture.json,
-        описанный в README. Его можно переслать разработчику или в чат
-        с Клодом, чтобы дописать разбор под реальный сайт.
+        Бот попробует прямой API сайта (быстро), и если не получится —
+        запасной способ через браузер с перехватом сетевых запросов.
         """
         parts = message.text.split(maxsplit=1)
         date_arg = parts[1] if len(parts) > 1 else "сегодня"
 
-        await message.answer(f"Захожу на сайт, проверяю расписание на «{date_arg}»…")
+        # удалим файл от прошлого запуска, чтобы не перепутать со свежим
+        if DEBUG_CAPTURE_FILE.exists():
+            DEBUG_CAPTURE_FILE.unlink()
+
+        await message.answer(f"Проверяю расписание на «{date_arg}»…")
         try:
             slots = await fetch_schedule_auto(date_arg)
         except Exception as e:
@@ -120,23 +122,25 @@ def register_handlers(dp: Dispatcher) -> None:
             slots = None
 
         if slots:
-            await message.answer(f"Нашёл часы: {', '.join(slots)}")
+            method = "прямой API сайта" if not DEBUG_CAPTURE_FILE.exists() else "запасной способ через браузер"
+            await message.answer(f"Нашёл часы ({method}): {', '.join(slots)}")
+        elif DEBUG_CAPTURE_FILE.exists():
+            await message.answer(
+                "Прямой API не ответил, пробовал через браузер — тоже не нашёл "
+                "расписание. Сейчас пришлю файл с тем, что вообще удалось "
+                "перехватить по сети — по нему можно понять, как поправить разбор."
+            )
         else:
             await message.answer(
-                "Ничего не нашёл автоматически. Сейчас пришлю файл с тем, что "
-                "вообще удалось перехватить по сети — по нему можно понять, "
-                "как поправить разбор (см. README, раздел «Калибровка»)."
+                "Не получилось ни через прямой API, ни через браузер — похоже, "
+                "granpadel.ru сейчас недоступен вообще, или дату не удалось "
+                "распознать. Попробуйте ещё раз чуть позже."
             )
 
         if DEBUG_CAPTURE_FILE.exists():
             await message.answer_document(
                 FSInputFile(str(DEBUG_CAPTURE_FILE)),
                 caption="Сырой перехваченный сетевой трафик страницы бронирования.",
-            )
-        else:
-            await message.answer(
-                "Файла с перехваченным трафиком нет — похоже, сайт вообще "
-                "не открылся (проверьте, что granpadel.ru доступен)."
             )
 
     @dp.message(F.text == "/menu")
