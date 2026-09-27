@@ -136,11 +136,27 @@ def _slots_from_api_payload(data: dict) -> list[str]:
 
 
 async def _fetch_direct_api(d: date) -> Optional[list[str]]:
-    """Основной способ: напрямую стучимся в API сайта, без браузера."""
+    """Основной способ: напрямую стучимся в API сайта, без браузера.
+
+    Заголовки ниже — не для маскировки, а потому что API, похоже,
+    иначе отвечает (или не отвечает) без них: сайт различает запрос
+    от настоящего браузера и «голый» HTTP-запрос без Referer/Origin/
+    User-Agent. Без этих заголовков запрос молча не проходил и бот
+    скатывался в более медленный запасной способ через браузер."""
     all_slots: list[str] = []
     got_any_response = False
 
-    async with httpx.AsyncClient(timeout=10) as client:
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+        ),
+        "Referer": "https://granpadel.ru/book",
+        "Origin": "https://granpadel.ru",
+        "Accept": "application/json, text/plain, */*",
+    }
+
+    async with httpx.AsyncClient(timeout=10, headers=headers) as client:
         for court_type in COURT_TYPES:
             try:
                 resp = await client.get(
@@ -152,11 +168,13 @@ async def _fetch_direct_api(d: date) -> Optional[list[str]]:
                     },
                 )
                 if resp.status_code != 200:
+                    print(f"[schedule.py] API {court_type}: статус {resp.status_code}, тело: {resp.text[:200]!r}")
                     continue
                 data = resp.json()
                 got_any_response = True
                 all_slots.extend(_slots_from_api_payload(data))
-            except Exception:
+            except Exception as e:
+                print(f"[schedule.py] API {court_type}: исключение {e!r}")
                 continue  # этот court_type не подошёл — пробуем следующий, не падаем
 
     if not got_any_response:
